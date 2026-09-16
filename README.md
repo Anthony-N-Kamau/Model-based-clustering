@@ -65,7 +65,3 @@ The report also verifies `mclust`'s BIC by hand. Computing `-2 * loglik + log(n)
 Fitting `Mclust(df)` with no constraints searches all covariance structures and 1–9 components. The BIC-optimal model is **VVE with 3 components** (variable volume, variable shape, equal orientation), splitting the 200 notes 18 / 98 / 84 — one more cluster than the two known real-world classes.
 
 Forcing two components with the most flexible structure (`VVV`) gives a matrix of bivariate density contours. `Diagonal`–`Top` and `Diagonal`–`Bottom` produce the cleanest separation, while pairs like `Left`–`Right` overlap almost completely. Plotting cluster assignments with points sized by classification uncertainty shows the model is confident nearly everywhere: only three points carry meaningful uncertainty, and they don't sit on the visual boundary in the `Left`/`Right` view — the remaining dimensions resolve them.
-
-## Author
-
-Anthony Kamau
