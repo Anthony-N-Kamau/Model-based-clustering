@@ -1,0 +1,255 @@
+---
+title: "Model Based Clustering using MClust"
+author: "Anthony Kamau"
+toc: yes
+output: pdf_document
+---
+
+# Introduction
+We shall apply model based clustering on a dataset of bank note measurements
+
+Load the packages and data. The data is built into the `mclust` package.
+
+```{r setup, warning=FALSE, message=FALSE}
+# install.packages(c("mclust", "patchwork", "ggridges"))
+
+# load packages
+library(mclust)
+library(tidyverse)
+library(patchwork)
+library(ggridges)
+
+# load data
+df <- as.tibble(banknote)
+```
+
+# Data Exploration
+```{r}
+# help file to understand dataset
+?banknote
+
+# scatter plot
+df |>
+  ggplot(aes(x = Left, y = Right, colour = Status)) +
+  geom_point(position = position_jitter())
+
+# The classes are not easy to distinguish, there is considerable overlap between 
+# the two classes
+```
+
+```{r, message=FALSE}
+# remove Status column from the data set
+df <- df |> select(-Status)
+
+# density plot for all columns in the data set
+df |> ggplot(aes(x = Length)) + geom_density() + theme_minimal() +
+  df |> ggplot(aes(x = Left)) + geom_density() + theme_minimal() +
+  df |> ggplot(aes(x = Right)) + geom_density() + theme_minimal() +
+  df |> ggplot(aes(x = Bottom)) + geom_density() + theme_minimal() +
+  df |> ggplot(aes(x = Top)) + geom_density() + theme_minimal() +
+  df |> ggplot(aes(x = Diagonal)) + geom_density() + theme_minimal()
+
+# The diagonal feature looks good. Look at the two bumps in its density plot
+
+# colorful alternative
+df |> mutate(across(everything(), scale)) |> 
+  pivot_longer(everything(), names_to = "feature", values_to = "value") |>
+  ggplot(aes(x = value, y = feature, fill = feature)) + 
+  geom_density_ridges() +
+  scale_fill_viridis_d(guide = "none") +
+  theme_minimal()
+
+# 6 univariate density plots (Length, Left, Right, Bottom, Top, Diagonal) are 
+# compared to see which single feature shows the clearest separation into 
+# two groups (bimodal meaning 2 distinct bumps)
+# Diagonal stands out with two clearly separated peaks in its density curve,
+# while the others are mostly single-peaked (unimodal) or only weakly bimodal.
+# Diagonal the best single candidate feature for clustering, since a two-humped 
+# density strongly suggests two underlying subpopulations (exactly what model-based 
+# clustering is designed to detect.
+```
+# Univariate model-based clustering
+Perform model-based clustering with 2 clusters on the `Diagonal` feature, assuming equal 
+variance i.e. forcing both clusters to share the same variance
+```{r}
+fit_E_2 <- Mclust(df$Diagonal, G = 2, modelNames = "E")
+
+# means
+fit_E_2$parameters$mean
+
+# variance
+fit_E_2$parameters$variance$sigmasq
+
+# Means (139.45 and 141.52), two distinct centre, consistent with the two 
+# humped density density seen earlier
+# Variance (0.244), shared by both clusters, since equal clusters was assumed
+```
+Compute the model's BIC using its log-likelihood and compare it to the BIC stored
+in the model object.
+```{r}
+# This model has 4 parameters (1 class probability pi, 2 means, and 1 variance)
+# BIC computed 
+- 2 * fit_E_2$loglik + log(nrow(df)) * 4
+
+# BIC from mclust package
+fit_E_2$bic
+
+# BIC from the Mclust package is wrongly multiplied by -1
+
+# manual BIC calculation using the formula (-2 × log-likelihood + log(n) × m, 
+# where m = 4 parameters i.e. 1 mixing proportion, 2 means, 1 shared variance) 
+# gives 569.47, matching fit_E_2$bic exactly (aside from a sign flip). 
+# Mclust stores BIC as the negative of the conventional definition, 
+# so fit_E_2$bic = -569.4667
+# You need to negate it inorder to make comparissons
+```
+
+
+```{r}
+# plot the density using base R plots
+plot(fit_E_2, "density", xlab = "Diagonal measurement")
+# add the observations using rug marks
+rug(df$Diagonal)
+
+# shows two symmetric, equally-wide bell curves centered near 139.5 and 141.5, 
+# with rug marks below showing the actual raw data points. 
+# The two bumps have the same width because equal variance was forced.
+```
+
+Perform model-based clustering with 2 clusters on the `Diagonal` feature again, but
+now assume unequal variances.
+```{r}
+# Let's set the seed for reproducibility
+fit_V_2 <- Mclust(df$Diagonal, G = 2, modelNames = "V")
+
+# mean
+fit_V_2$parameters$mean
+
+# variance
+fit_V_2$parameters$variance$sigmasq
+
+# Means (139.50 and 141.56), nearly identical to the equal variance model
+# Variance (0.359 and 0.150), now clearly different. The first cluster (lower Diagonal)
+# is more spread out than the second
+```
+```{r}
+# plot the density using base R plots
+plot(fit_V_2, "density", xlab = "Diagonal measurement")
+# add the observations using rug marks
+rug(df$Diagonal)
+
+# The left bump is wider/shorter (more spread, less peaked) and the right bump 
+# is narrower/taller (more concentrated), directly reflecting the different variances.
+```
+
+
+```{r}
+# This model has 5 parameters: 1 class probability pi, 2 means, and 2 variance
+# BIC computed
+-2*fit_V_2$loglik
+
+# BIC from mclust package
+fit_V_2$bic
+```
+
+## Deviance Comparisson
+```{r}
+# model with equal variance
+-2*fit_E_2$loglik
+
+# model with unequal variance
+-2*fit_V_2$loglik
+
+# Lower deviance means better fit to the data, so the V (unequal variance) model 
+# fits better. 
+# This makes sense, since it has an extra parameter giving it more flexibility 
+# to match the data exactly.
+```
+
+## BIC Comparisson
+`NB:` Remember, the package shows negative BIC
+```{r}
+# model with equal variance
+-fit_E_2$bic
+
+# model with unequal variance
+-fit_V_2$bic
+
+# The V model still wins on BIC (lower is better), but the gap between the two models
+# has narrowed compared to the deviance comparison. 
+# This is exactly what BIC is designed to do. It penalizes the extra parameter in
+# the V model, so while V still fits better overall, its advantage is less 
+# dramatic than raw deviance alone suggests. BIC is protecting against overfitting.
+```
+
+# Multivariate model base clustering
+We will now use all the available information in the data set to cluster the
+observations
+
+```{r}
+# mlcust with all 6 features
+fit <- Mclust(df)
+
+summary(fit)
+
+# The optimal model is a VVE model with 3 components
+
+
+# mean parameters
+fit$parameters$mean
+
+# 3 clusters times 6 variables = 18 mean parameters
+
+
+# Running Mclust(df) with no constraints lets it search across all covariance 
+# structures and 1–9 possible cluster counts, then pick whichever combination 
+# minimizes BIC. The winner: a VVE model with 3 components, meaning:
+# Variable volume (cluster can have different sizes/spread)
+# Variable shape (clusters can be different shapes, not just circular)
+# Equal orientation (all clusters point the same direction in feature space)
+
+# 3 clusters, with 18, 98, and 84 observations respectively (200 total)
+# Multivariate clustering found 3 clusters, not 2, even though the data only has 
+# 2 true classes (genuine/counterfeit). 
+# The data may genuinely split into 3 identifiable subgroups, even though our 
+# external knowledge says there are only 2 real-world categories.
+```
+Forcing exactly 2 clusters (to match the known genuine/counterfeit split) with the most flexible
+covariance structure (VVV = variable volume, variable shape, variable orientation). The resulting
+matrix of bivariate density contour plots lets you inspect, for every pair of variables, 
+how well-separated the two estimated clusters are.
+```{r}
+# 2-component VVV model 
+VVV2 <- Mclust(df, 2, "VVV")
+
+# matrix of bivariate contour (density) plots
+plot(VVV2, "density")
+
+# Diagonal-top, and diagonal-bottom separate the classes very well
+# Diagonal-Top and Diagonal-Bottom pairs show the clearest separation 
+# (two distinct, non-overlapping contour blobs), while most other pairs 
+# (like Left-Right, matching the very first plot in the document) show heavily 
+# overlapping contours, reinforcing that Diagonal is the single most discriminating 
+# feature, and combining it with Top or Bottom gives especially clean separation.
+```
+Plotting Left vs Right again, but now coloring points by the model's estimated 
+cluster assignment (not the true Status labels) and sizing points by classification 
+uncertainty.
+```{r}
+df |> ggplot(aes(x = Left, y = Right, colour = as_factor(VVV2$classification),
+                 size = VVV2$uncertainty)) + 
+  geom_point(position = position_jitter()) +
+  scale_size(range = c(1, 3)) +
+  labs(colour = "Cluster", size = "Uncertainty")
+
+
+# almost all points are small (low uncertainty) meaning the model is very confident 
+# in most assignments, with only 3 points showing any meaningful uncertainty, 
+# and notably, those uncertain points don't sit near the visual boundary between 
+# the two colors in this particular Left/Right view.
+# only 3 points are slightly uncertain, and they are not around the border of the 
+# classes in these two dimensions.
+# Apparently, the other dimensions give enough information
+# about those points near the border
+```
+
